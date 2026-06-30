@@ -1,25 +1,38 @@
 import os
 
-import litellm
 import streamlit as st
-from crewai import Agent, Crew, LLM, Task
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Remove cache_breakpoint from Groq calls (same fix as main.py)
-_original_completion = litellm.completion
+
+def _apply_groq_litellm_patch() -> None:
+    """Remove cache_breakpoint from Groq calls (same fix as main.py)."""
+    import litellm
+
+    original_completion = litellm.completion
+
+    def patched_completion(*args, **kwargs):
+        if "messages" in kwargs:
+            for msg in kwargs["messages"]:
+                if isinstance(msg, dict) and "cache_breakpoint" in msg:
+                    del msg["cache_breakpoint"]
+        return original_completion(*args, **kwargs)
+
+    litellm.completion = patched_completion
 
 
-def _patched_completion(*args, **kwargs):
-    if "messages" in kwargs:
-        for msg in kwargs["messages"]:
-            if isinstance(msg, dict) and "cache_breakpoint" in msg:
-                del msg["cache_breakpoint"]
-    return _original_completion(*args, **kwargs)
+try:
+    from crewai import Agent, Crew, LLM, Task
 
-
-litellm.completion = _patched_completion
+    _apply_groq_litellm_patch()
+except ImportError as exc:
+    st.error(
+        "Missing dependencies. Ensure `requirements.txt` is in your repo root "
+        "and redeploy. Required: streamlit, crewai, litellm, python-dotenv."
+    )
+    st.code(str(exc))
+    st.stop()
 
 
 def get_llm(api_key: str) -> LLM:
